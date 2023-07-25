@@ -15,10 +15,16 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v2
 
+      - name: lowercase repo name
+        id: lowercase-repo
+        uses: Entepotenz/change-string-case-action@v1
+        with:
+          string: ${{ github.repository }}
+
       - name: Prepare
         id: prep
         run: |
-          DOCKER_IMAGE=ghcr.io/${{ github.repository }}
+          DOCKER_IMAGE=ghcr.io/${{ steps.lowercase-repo.outputs.lowercase }}
           VERSION=latest
           if [[ '${{ github.head_ref }}' != '' ]]; then
             VERSION=${{github.head_ref}}
@@ -30,7 +36,7 @@ jobs:
       - name: Prepare-multiarch
         id: prep-multiarch
         run: |
-          DOCKER_IMAGE=ghcr.io/${{ github.repository }}
+          DOCKER_IMAGE=ghcr.io/${{ steps.lowercase-repo.outputs.lowercase }}
           VERSION=latest
           if [[ '${{ github.head_ref }}' != '' ]]; then
             VERSION=${{github.head_ref}}
@@ -56,7 +62,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: ./.docker/Dockerfile
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.prep.outputs.tags }}
 
@@ -64,7 +70,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: ./.docker/Dockerfile
-          platforms: linux/amd64,linux/arm/v7,linux/arm64
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64/v8,linux/arm/v7
           push: true
           tags: ${{ steps.prep-multiarch.outputs.tags-multiarch }}
