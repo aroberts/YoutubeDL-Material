@@ -1,4 +1,4 @@
-const { uuid } = require('uuidv4');
+const { v4: uuid } = require('uuid');
 const fs = require('fs-extra');
 const { promisify } = require('util');
 const auth_api = require('./authentication/auth');
@@ -20,11 +20,6 @@ const ps = require('ps-node');
 const Feed = require('feed').Feed;
 const session = require('express-session');
 
-// needed if bin/details somehow gets deleted
-if (!fs.existsSync(CONSTS.DETAILS_BIN_PATH)) fs.writeJSONSync(CONSTS.DETAILS_BIN_PATH, {"version":"2000.06.06","path":"node_modules\\youtube-dl\\bin\\youtube-dl.exe","exec":"youtube-dl.exe","downloader":"youtube-dl"})
-
-const youtubedl = require('youtube-dl');
-
 const logger = require('./logger');
 const config_api = require('./config.js');
 const downloader_api = require('./downloader');
@@ -35,6 +30,7 @@ const twitch_api = require('./twitch');
 const youtubedl_api = require('./youtube-dl');
 const archive_api = require('./archive');
 const files_api = require('./files');
+const notifications_api = require('./notifications');
 
 var app = express();
 
@@ -536,15 +532,9 @@ async function loadConfig() {
         // set downloading to false
         let subscriptions = await subscriptions_api.getAllSubscriptions();
         subscriptions.forEach(async sub => subscriptions_api.writeSubscriptionMetadata(sub));
-        subscriptions_api.updateSubscriptionPropertyMultiple(subscriptions, {downloading: false});
+        subscriptions_api.updateSubscriptionPropertyMultiple(subscriptions, {downloading: false, child_process: null});
         // runs initially, then runs every ${subscriptionCheckInterval} seconds
-        const watchSubscriptionsInterval = function() {
-            watchSubscriptions();
-            const subscriptionsCheckInterval = config_api.getConfigItem('ytdl_subscriptions_check_interval');
-            setTimeout(watchSubscriptionsInterval, subscriptionsCheckInterval*1000);
-        }
-
-        watchSubscriptionsInterval();
+        subscriptions_api.watchSubscriptionsInterval();
     }
 
     // start the server here
@@ -574,63 +564,8 @@ function loadConfigValues() {
     utils.updateLoggerLevel(logger_level);
 }
 
-function calculateSubcriptionRetrievalDelay(subscriptions_amount) {
-    // frequency is once every 5 mins by default
-    const subscriptionsCheckInterval = config_api.getConfigItem('ytdl_subscriptions_check_interval');
-    let interval_in_ms = subscriptionsCheckInterval * 1000;
-    const subinterval_in_ms = interval_in_ms/subscriptions_amount;
-    return subinterval_in_ms;
-}
-
-async function watchSubscriptions() {
-    let subscriptions = await subscriptions_api.getAllSubscriptions();
-
-    if (!subscriptions) return;
-
-    // auto pause deprecated streamingOnly mode
-    const streaming_only_subs = subscriptions.filter(sub => sub.streamingOnly);
-    subscriptions_api.updateSubscriptionPropertyMultiple(streaming_only_subs, {paused: true});
-
-    const valid_subscriptions = subscriptions.filter(sub => !sub.paused && !sub.streamingOnly);
-
-    let subscriptions_amount = valid_subscriptions.length;
-    let delay_interval = calculateSubcriptionRetrievalDelay(subscriptions_amount);
-
-    let current_delay = 0;
-
-    const multiUserMode = config_api.getConfigItem('ytdl_multi_user_mode');
-    for (let i = 0; i < valid_subscriptions.length; i++) {
-        let sub = valid_subscriptions[i];
-
-        // don't check the sub if the last check for the same subscription has not completed
-        if (subscription_timeouts[sub.id]) {
-            logger.verbose(`Subscription: skipped checking ${sub.name} as the last check for ${sub.name} has not completed.`);
-            continue;
-        }
-
-        if (!sub.name) {
-            logger.verbose(`Subscription: skipped check for subscription with uid ${sub.id} as name has not been retrieved yet.`);
-            continue;
-        }
-
-        logger.verbose('Watching ' + sub.name + ' with delay interval of ' + delay_interval);
-        setTimeout(async () => {
-            const multiUserModeChanged = config_api.getConfigItem('ytdl_multi_user_mode') !== multiUserMode;
-            if (multiUserModeChanged) {
-                logger.verbose(`Skipping subscription ${sub.name} due to multi-user mode change.`);
-                return;
-            }
-            await subscriptions_api.getVideosForSub(sub, sub.user_uid);
-            subscription_timeouts[sub.id] = false;
-        }, current_delay);
-        subscription_timeouts[sub.id] = true;
-        current_delay += delay_interval;
-        const subscriptionsCheckInterval = config_api.getConfigItem('ytdl_subscriptions_check_interval');
-        if (current_delay >= subscriptionsCheckInterval * 1000) current_delay = 0;
-    }
-}
-
 function getOrigin() {
+    if (process.env.CODESPACES) return `https://${process.env.CODESPACE_NAME}-4200.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`;
     return url_domain.origin;
 }
 
@@ -655,38 +590,11 @@ function generateEnvVarConfigItem(key) {
     return {key: key, value: process['env'][key]};
 }
 
-// currently only works for single urls
-async function getUrlInfos(url) {
-    let startDate = Date.now();
-    let result = [];
-    return new Promise(resolve => {
-        youtubedl.exec(url, ['--dump-json'], {maxBuffer: Infinity}, (err, output) => {
-            let new_date = Date.now();
-            let difference = (new_date - startDate)/1000;
-            logger.debug(`URL info retrieval delay: ${difference} seconds.`);
-            if (err) {
-                logger.error(`Error during retrieving formats for ${url}: ${err}`);
-                resolve(null);
-            }
-            let try_putput = null;
-            try {
-                try_putput = JSON.parse(output);
-                result = try_putput;
-            } catch(e) {
-                logger.error(`Failed to retrieve available formats for url: ${url}`);
-            }
-            resolve(result);
-        });
-    });
-}
-
 // youtube-dl functions
 
 async function startYoutubeDL() {
     // auto update youtube-dl
-    youtubedl_api.verifyBinaryExistsLinux();
-    const update_available = await youtubedl_api.checkForYoutubeDLUpdate();
-    if (update_available) await youtubedl_api.updateYoutubeDL(update_available);
+    await youtubedl_api.checkForYoutubeDLUpdate();
 }
 
 app.use(function(req, res, next) {
@@ -706,7 +614,7 @@ app.use(function(req, res, next) {
         next();
     } else if (req.query.apiKey && config_api.getConfigItem('ytdl_use_api_key') && req.query.apiKey === config_api.getConfigItem('ytdl_api_key')) {
         next();
-    } else if (req.path.includes('/api/stream/') || req.path.includes('/api/thumbnail/') || req.path.includes('/api/rss')) {
+    } else if (req.path.includes('/api/stream/') || req.path.includes('/api/thumbnail/') || req.path.includes('/api/rss') || req.path.includes('/api/telegramRequest')) {
         next();
     } else {
         logger.verbose(`Rejecting request - invalid API use for endpoint: ${req.path}. API key received: ${req.query.apiKey}`);
@@ -1212,10 +1120,10 @@ app.post('/api/subscribe', optionalJwt, async (req, res) => {
 
 app.post('/api/unsubscribe', optionalJwt, async (req, res) => {
     let deleteMode = req.body.deleteMode
-    let sub = req.body.sub;
+    let sub_id = req.body.sub_id;
     let user_uid = req.isAuthenticated() ? req.user.uid : null;
 
-    let result_obj = subscriptions_api.unsubscribe(sub, deleteMode, user_uid);
+    let result_obj = subscriptions_api.unsubscribe(sub_id, deleteMode, user_uid);
     if (result_obj.success) {
         res.send({
             success: result_obj.success
@@ -1285,21 +1193,49 @@ app.post('/api/getSubscription', optionalJwt, async (req, res) => {
 });
 
 app.post('/api/downloadVideosForSubscription', optionalJwt, async (req, res) => {
-    let subID = req.body.subID;
-    let user_uid = req.isAuthenticated() ? req.user.uid : null;
+    const subID = req.body.subID;
 
-    let sub = subscriptions_api.getSubscription(subID, user_uid);
-    subscriptions_api.getVideosForSub(sub, user_uid);
+    const sub = subscriptions_api.getSubscription(subID);
+    subscriptions_api.getVideosForSub(sub.id);
     res.send({
         success: true
     });
 });
 
 app.post('/api/updateSubscription', optionalJwt, async (req, res) => {
-    let updated_sub = req.body.subscription;
+    const updated_sub = req.body.subscription;
+
+    const success = subscriptions_api.updateSubscription(updated_sub);
+    res.send({
+        success: success
+    });
+});
+
+app.post('/api/checkSubscription', optionalJwt, async (req, res) => {
+    let sub_id = req.body.sub_id;
     let user_uid = req.isAuthenticated() ? req.user.uid : null;
 
-    let success = subscriptions_api.updateSubscription(updated_sub, user_uid);
+    const success = subscriptions_api.getVideosForSub(sub_id, user_uid);
+    res.send({
+        success: success
+    });
+});
+
+app.post('/api/cancelCheckSubscription', optionalJwt, async (req, res) => {
+    let sub_id = req.body.sub_id;
+    let user_uid = req.isAuthenticated() ? req.user.uid : null;
+
+    const success = subscriptions_api.cancelCheckSubscription(sub_id, user_uid);
+    res.send({
+        success: success
+    });
+});
+
+app.post('/api/cancelSubscriptionCheck', optionalJwt, async (req, res) => {
+    let sub_id = req.body.sub_id;
+    let user_uid = req.isAuthenticated() ? req.user.uid : null;
+
+    const success = subscriptions_api.getVideosForSub(sub_id, user_uid);
     res.send({
         success: success
     });
@@ -1643,6 +1579,7 @@ app.get('/api/stream', optionalJwt, async (req, res) => {
     }
     if (!fs.existsSync(file_path)) {
         logger.error(`File ${file_path} could not be found! UID: ${uid}, ID: ${file_obj && file_obj.id}`);
+        return;
     }
     const stat = fs.statSync(file_path);
     const fileSize = stat.size;
@@ -1777,6 +1714,10 @@ app.post('/api/cancelDownload', optionalJwt, async (req, res) => {
 app.post('/api/getTasks', optionalJwt, async (req, res) => {
     const tasks = await db_api.getRecords('tasks');
     for (let task of tasks) {
+        if (!tasks_api.TASKS[task['key']]) {
+            logger.verbose(`Task ${task['key']} does not exist!`);
+            continue;
+        }
         if (task['schedule']) task['next_invocation'] = tasks_api.TASKS[task['key']]['job'].nextInvocation().getTime();
     }
     res.send({tasks: tasks});
@@ -1919,11 +1860,11 @@ app.post('/api/clearAllLogs', optionalJwt, async function(req, res) {
 });
 
   app.post('/api/getFileFormats', optionalJwt, async (req, res) => {
-    let url = req.body.url;
-    let result = await getUrlInfos(url);
+    const url = req.body.url;
+    const result = await downloader_api.getVideoInfoByURL(url);
     res.send({
-        result: result,
-        success: !!result
+        result: result && result.length === 1 ? result[0] : null,
+        success: result && result.length === 0
     })
 });
 
@@ -2085,6 +2026,25 @@ app.post('/api/deleteAllNotifications', optionalJwt, async (req, res) => {
     res.send({success: success});
 });
 
+app.post('/api/telegramRequest', async (req, res) => {
+    if (!req.body.message  && !req.body.message.text) {
+        logger.error('Invalid Telegram request received!');
+        res.sendStatus(400);
+        return;
+    }
+    const text = req.body.message.text;
+    const regex_exp = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)?/gi;
+    const url_regex = new RegExp(regex_exp);
+    if (text.match(url_regex)) {
+        downloader_api.createDownload(text, 'video', {}, req.query.user_uid ? req.query.user_uid : null);
+        res.sendStatus(200);
+    } else {
+        logger.error('Invalid Telegram request received! Make sure you only send a valid URL.');
+        notifications_api.sendTelegramNotification({title: 'Invalid Telegram Request', body: 'Make sure you only send a valid URL.', url: text});
+        res.sendStatus(400);
+    }
+});
+
 // rss feed
 
 app.get('/api/rss', async function (req, res) {
@@ -2151,6 +2111,8 @@ app.use(function(req, res, next) {
     }
 
     let index_path = path.join(__dirname, 'public', 'index.html');
+
+    res.setHeader('Content-Type', 'text/html');
 
     fs.createReadStream(index_path).pipe(res);
 

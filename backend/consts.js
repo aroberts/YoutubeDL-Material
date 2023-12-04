@@ -154,6 +154,10 @@ exports.CONFIG_ITEMS = {
         'key': 'ytdl_telegram_chat_id',
         'path': 'YoutubeDLMaterial.API.telegram_chat_id'
     },
+    'ytdl_telegram_webhook_proxy': {
+        'key': 'ytdl_telegram_webhook_proxy',
+        'path': 'YoutubeDLMaterial.API.telegram_webhook_proxy'
+    },
     'ytdl_webhook_url': {
         'key': 'ytdl_webhook_url',
         'path': 'YoutubeDLMaterial.API.webhook_URL'
@@ -269,7 +273,8 @@ exports.AVAILABLE_PERMISSIONS = [
     'tasks_manager'
 ];
 
-exports.DETAILS_BIN_PATH = 'node_modules/youtube-dl/bin/details'
+exports.DETAILS_BIN_PATH = 'appdata/youtube-dl.json'
+exports.OUTDATED_YOUTUBEDL_VERSION = "2020.00.00";
 
 // args that have a value after it (e.g. -o <output> or -f <format>)
 const YTDL_ARGS_WITH_VALUES = [

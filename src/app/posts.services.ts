@@ -113,11 +113,13 @@ import {
     Archive,
     Subscription,
     RestartDownloadResponse,
-    TaskType
+    TaskType,
+    CheckSubscriptionRequest
 } from '../api-types';
 import { isoLangs } from './dialogs/user-profile-dialog/locales_list';
 import { Title } from '@angular/platform-browser';
 import { MatDrawerMode } from '@angular/material/sidenav';
+import { environment } from '../environments/environment';
 
 @Injectable()
 export class PostsService implements CanActivate {
@@ -175,7 +177,7 @@ export class PostsService implements CanActivate {
 
         if (isDevMode()) {
             this.debugMode = true;
-            this.path = 'http://localhost:17442/api/';
+            this.path = !environment.codespaces ? 'http://localhost:17442/api/' : `${window.location.origin.replace('4200', '17442')}/api/`;
         }
 
         this.http_params = `apiKey=${this.auth_token}`
@@ -458,7 +460,7 @@ export class PostsService implements CanActivate {
         return this.http.post<SuccessObject>(this.path + 'deleteArchiveItems', body, this.httpOptions);
     }
 
-    getFileFormats(url) {
+    getFileFormats(url: string) {
         const body: GetFileFormatsRequest = {url: url};
         return this.http.post<GetFileFormatsResponse>(this.path + 'getFileFormats', body, this.httpOptions);
     }
@@ -566,8 +568,18 @@ export class PostsService implements CanActivate {
         return this.http.post<SuccessObject>(this.path + 'updateSubscription', {subscription: subscription}, this.httpOptions);
     }
 
-    unsubscribe(sub: SubscriptionRequestData, deleteMode = false) {
-        const body: UnsubscribeRequest = {sub: sub, deleteMode: deleteMode};
+    checkSubscription(sub_id: string) {
+        const body: CheckSubscriptionRequest = {sub_id: sub_id};
+        return this.http.post<SuccessObject>(this.path + 'checkSubscription', body, this.httpOptions);
+    }
+
+    cancelCheckSubscription(sub_id: string) {
+        const body: CheckSubscriptionRequest = {sub_id: sub_id};
+        return this.http.post<SuccessObject>(this.path + 'cancelCheckSubscription', body, this.httpOptions);
+    }
+
+    unsubscribe(sub_id: string, deleteMode = false) {
+        const body: UnsubscribeRequest = {sub_id: sub_id, deleteMode: deleteMode};
         return this.http.post<UnsubscribeResponse>(this.path + 'unsubscribe', body, this.httpOptions)
     }
 
