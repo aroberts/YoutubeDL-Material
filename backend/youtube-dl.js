@@ -84,25 +84,25 @@ exports.killYoutubeDLProcess = async (child_process) => {
 }
 
 exports.checkForYoutubeDLUpdate = async () => {
-    const selected_fork = config_api.getConfigItem('ytdl_default_downloader');
-    const output_file_path = getYoutubeDLPath();
-    // get current version
-    let current_app_details_exists = fs.existsSync(CONSTS.DETAILS_BIN_PATH);
-    if (!current_app_details_exists[selected_fork]) {
-        logger.warn(`Failed to get youtube-dl binary details at location '${CONSTS.DETAILS_BIN_PATH}'. Generating file...`);
-        updateDetailsJSON(CONSTS.OUTDATED_YOUTUBEDL_VERSION, selected_fork, output_file_path);
-    }
-    const current_app_details = JSON.parse(fs.readFileSync(CONSTS.DETAILS_BIN_PATH));
-    const current_version = current_app_details[selected_fork]['version'];
-    const current_fork = current_app_details[selected_fork]['downloader'];
-
-    const latest_version = await exports.getLatestUpdateVersion(selected_fork);
-    // if the binary does not exist, or default_downloader doesn't match existing fork, or if the fork has been updated, redownload
-    // TODO: don't redownload if fork already exists
-    if (!fs.existsSync(output_file_path) || current_fork !== selected_fork || !current_version || current_version !== latest_version) {
-        logger.warn(`Updating ${selected_fork} binary to '${output_file_path}', downloading...`);
-        await exports.updateYoutubeDL(latest_version);
-    }
+    // const selected_fork = config_api.getConfigItem('ytdl_default_downloader');
+    // const output_file_path = getYoutubeDLPath();
+    // // get current version
+    // let current_app_details_exists = fs.existsSync(CONSTS.DETAILS_BIN_PATH);
+    // if (!current_app_details_exists[selected_fork]) {
+    //     logger.warn(`Failed to get youtube-dl binary details at location '${CONSTS.DETAILS_BIN_PATH}'. Generating file...`);
+    //     updateDetailsJSON(CONSTS.OUTDATED_YOUTUBEDL_VERSION, selected_fork, output_file_path);
+    // }
+    // const current_app_details = JSON.parse(fs.readFileSync(CONSTS.DETAILS_BIN_PATH));
+    // const current_version = current_app_details[selected_fork]['version'];
+    // const current_fork = current_app_details[selected_fork]['downloader'];
+    //
+    // const latest_version = await exports.getLatestUpdateVersion(selected_fork);
+    // // if the binary does not exist, or default_downloader doesn't match existing fork, or if the fork has been updated, redownload
+    // // TODO: don't redownload if fork already exists
+    // if (!fs.existsSync(output_file_path) || current_fork !== selected_fork || !current_version || current_version !== latest_version) {
+    //     logger.warn(`Updating ${selected_fork} binary to '${output_file_path}', downloading...`);
+    //     await exports.updateYoutubeDL(latest_version);
+    // }
 }
 
 exports.updateYoutubeDL = async (latest_update_version, custom_output_path = null) => {
@@ -128,7 +128,7 @@ async function downloadLatestYoutubeDLBinaryGeneric(youtubedl_fork, new_version,
         logger.error(e);
         return;
     }
-} 
+}
 
 exports.getLatestUpdateVersion = async (youtubedl_fork) => {
     const tags_url = exports.youtubedl_forks[youtubedl_fork]['tags_url'];
